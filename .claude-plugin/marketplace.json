@@ -1,0 +1,11 @@
+{
+  "name": "luma-mods",
+  "owner": { "name": "Luma-Sa" },
+  "plugins": [
+    {
+      "name": "usage-band",
+      "source": "./plugins/usage-band",
+      "description": "Bandeau au-dessus du prompt : limites 5h/7j, coût et tokens"
+    }
+  ]
+}
