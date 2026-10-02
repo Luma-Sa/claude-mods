@@ -38,4 +38,4 @@ claude plugin marketplace add "D:\Projets V2\MODS - CLI Statusline\claude-mods"
 claude plugin install usage-band@luma-mods
 ```
 
-Le catalogue local est chargé en place : une modification ici s'applique avec `/reload-plugins`.
+Après une modification : augmenter `version` dans `plugin.json`, lancer `claude plugin update usage-band@luma-mods`, puis `/reload-plugins`.
