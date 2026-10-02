@@ -10,6 +10,6 @@ export type Output = { session: number; lastTurn: number; input?: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-band': { usage: Usage; output: Output; now: number; counted: number }
+    'usage-band': { usage: Usage; output: Output; now: number }
   }
 }

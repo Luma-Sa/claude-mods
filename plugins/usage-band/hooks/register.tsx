@@ -10,12 +10,14 @@ const usage = atom({ plugin: 'usage-band', key: 'usage' } as const, {
 } as Usage)
 const output = atom({ plugin: 'usage-band', key: 'output' } as const, { session: 0, lastTurn: 0, input: 0 } as Output)
 const now = atom({ plugin: 'usage-band', key: 'now' } as const, 0)
-// Part of this session's cost already added to the daily ledger in $.store.
-const counted = atom({ plugin: 'usage-band', key: 'counted' } as const, 0)
+// Each session writes its own total under `cost:<startedAt>` in $.store, so the
+// today/month sums never count a cost twice, whatever runs in parallel.
+const COST_PREFIX = 'cost:'
+const KEEP_DAYS = 62
 
-const LEDGER = 'daily-usd'
+type SessionCost = { day: string; usd: number }
 
-type Ledger = Record<string, number>
+let sessionKey: string | null = null
 
 const toLimit = (limits: SessionRateLimit[], kind: string): Limit | null => {
   const limit = limits.find(l => l.kind === kind)
@@ -49,32 +51,39 @@ const pie = (percent: number) => (percent >= 88 ? '●' : percent >= 63 ? '◕' 
 
 async function sync($: EngineInterface, rateLimits: SessionRateLimit[], costUsd: number | undefined) {
   const at = await $.clock.now()
-  const ledger = ((await $.store.get(LEDGER)) ?? {}) as Ledger
   const today = dayKey(at)
+  const month = today.slice(0, 7)
+  const oldest = dayKey(at - KEEP_DAYS * 86_400_000)
 
-  if (costUsd !== undefined) {
-    const already = await read($, counted)
-    const delta = costUsd - already
-    if (delta > 0) {
-      ledger[today] = (ledger[today] ?? 0) + delta
-      await $.store.set(LEDGER, ledger)
-      await update($, counted, () => costUsd)
-    }
+  if (sessionKey !== null && costUsd !== undefined) {
+    const mine: SessionCost = { day: today, usd: costUsd }
+    await $.store.set(sessionKey, mine)
   }
 
-  const month = today.slice(0, 7)
-  const monthUsd = Object.entries(ledger)
-    .filter(([day]) => day.startsWith(month))
-    .reduce((sum, [, value]) => sum + value, 0)
+  let todayUsd = 0
+  let monthUsd = 0
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith(COST_PREFIX)) continue
+    const entry = (await $.store.get(key)) as SessionCost | undefined
+    if (!entry) continue
+    if (entry.day < oldest) {
+      await $.store.delete(key)
+      continue
+    }
+    if (entry.day === today) todayUsd += entry.usd
+    if (entry.day.startsWith(month)) monthUsd += entry.usd
+  }
 
-  await update($, usage, () => ({
+  const fresh: Usage = {
     fiveHour: toLimit(rateLimits, 'five_hour'),
     sevenDay: toLimit(rateLimits, 'seven_day'),
     costUsd: costUsd ?? null,
-    todayUsd: ledger[today] ?? 0,
+    todayUsd,
     monthUsd,
-  }))
+  }
+  await update($, usage, () => fresh)
   await update($, now, () => at)
+  return { fresh, at }
 }
 
 export const register: Register = on => {
@@ -85,6 +94,9 @@ export const register: Register = on => {
       description: 'Affiche la ligne du bandeau (limites, coût, tokens) : utile en session cloud, où le bandeau ne s’affiche pas',
     })
     const first = await $.session.usage()
+    sessionKey = `${COST_PREFIX}${first.startedAt}`
+    // The first version's shared ledger double-counted; it is replaced by per-session entries.
+    await $.store.delete('daily-usd')
     await sync($, first.rateLimits, first.cost?.usd)
     $.clock.every(60_000, async () => {
       const current = await $.session.usage()
@@ -95,10 +107,9 @@ export const register: Register = on => {
 
   on('command.run', { command: 'usage-debug' }, async $ => {
     const current = await $.session.usage()
-    await sync($, current.rateLimits, current.cost?.usd)
-    const u = await read($, usage)
+    // Reads in one dispatch see one moment, so use what sync computed rather than reading it back.
+    const { fresh: u, at } = await sync($, current.rateLimits, current.cost?.usd)
     const o = await read($, output)
-    const at = await read($, now)
 
     const limit = (label: string, l: Limit | null) => {
       if (l === null) return `– ${label}`

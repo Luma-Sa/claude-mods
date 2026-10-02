@@ -1,6 +1,6 @@
 {
   "name": "usage-band",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Bandeau au-dessus du prompt : limites 5h/7j, coût et tokens de sortie",
   "author": { "name": "romain" },
   "types": "./types/index.d.ts"
