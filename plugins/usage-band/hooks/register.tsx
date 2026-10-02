@@ -82,7 +82,7 @@ export const register: Register = on => {
     const result = await next(e)
     await $.command.register({
       name: 'usage-debug',
-      description: 'Montre les chiffres bruts que le bandeau usage-band reçoit',
+      description: 'Affiche la ligne du bandeau (limites, coût, tokens) : utile en session cloud, où le bandeau ne s’affiche pas',
     })
     const first = await $.session.usage()
     await sync($, first.rateLimits, first.cost?.usd)
@@ -95,8 +95,25 @@ export const register: Register = on => {
 
   on('command.run', { command: 'usage-debug' }, async $ => {
     const current = await $.session.usage()
-    const raw = { rateLimits: current.rateLimits, cost: current.cost, ledger: await $.store.get(LEDGER) }
-    return { text: '```json\n' + JSON.stringify(raw, null, 2) + '\n```' }
+    await sync($, current.rateLimits, current.cost?.usd)
+    const u = await read($, usage)
+    const o = await read($, output)
+    const at = await read($, now)
+
+    const limit = (label: string, l: Limit | null) => {
+      if (l === null) return `– ${label}`
+      const reset = untilReset(l.resetsAt, at)
+      return `${pie(l.percent)} ${Math.round(l.percent)}% ${label}${reset !== '' ? ` · resets ${reset}` : ''}`
+    }
+
+    const line = [
+      limit('5h', u.fiveHour),
+      limit('7d', u.sevenDay),
+      `$ ${usd(u.costUsd ?? 0)} session · ${usd(u.todayUsd ?? 0)} today · ${usd(u.monthUsd ?? 0)} mo`,
+      `⇅ ${tokens((o.input ?? 0) + o.session)} tokens · ${tokens(o.session)} out`,
+    ].join('     ')
+
+    return { text: line }
   })
 
   on('session.measure', async ($, e, next) => {
